@@ -105,11 +105,15 @@ def format_message(changes: Changes) -> str:
     return "\n".join(cleaned).strip()
 
 
-def send_discord(message: str):
+def send_discord(message: str) -> bool:
     """Send a message to Discord via webhook. Splits if over 2000 chars."""
     if not DISCORD_WEBHOOK_URL:
         log.warning("DISCORD_WEBHOOK_URL not set, skipping notification.")
-        return
+        return False
+
+    if not message.strip():
+        log.info("Empty Discord message, skipping send.")
+        return False
 
     # Split long messages
     chunks = []
@@ -123,50 +127,74 @@ def send_discord(message: str):
     if message:
         chunks.append(message)
 
+    sent_any = False
     for chunk in chunks:
         webhook = DiscordWebhook(url=DISCORD_WEBHOOK_URL, content=chunk)
         response = webhook.execute()
         if response and hasattr(response, "status_code") and response.status_code >= 400:
             log.error("Discord webhook failed: %s", response.status_code)
+            continue
+        sent_any = True
+    return sent_any
 
 
-def send_assignments(assignments):
+def send_assignments(assignments) -> bool:
     """Format and send all current assignments to Discord."""
     if not assignments:
         log.info("No assignments to send.")
-        return
+        return False
 
     lines = ["**📋 ALL ASSIGNMENTS**", ""]
+    grouped = {}
     for a in assignments:
-        lines.append(f"  [{a.course_name}] **{a.title}**")
-        lines.append(f"    Due: {a.due_date or 'N/A'} — {a.status}")
-        if a.url:
-            lines.append(f"    {a.url}")
+        grouped.setdefault(a.course_name, []).append(a)
+    for course in sorted(grouped):
+        lines.append(f"**{course}**")
+        for a in grouped[course]:
+            lines.append(f"  • **{a.title}**")
+            lines.append(f"    Due: {a.due_date or 'N/A'} — {a.status}")
+            if a.url:
+                lines.append(f"    {a.url}")
+        lines.append("")
     lines.append("")
 
-    message = "\n".join(lines)
+    message = "\n".join(lines).strip()
     log.info("Sending assignments to Discord...")
-    send_discord(message)
-    log.info("Assignments sent.")
+    sent = send_discord(message)
+    if sent:
+        log.info("Assignments sent.")
+    else:
+        log.info("Assignments not sent.")
+    return sent
 
 
-def send_grades(grades):
+def send_grades(grades) -> bool:
     """Format and send all current grades to Discord."""
     if not grades:
         log.info("No grades to send.")
-        return
+        return False
 
     lines = ["**📊 ALL GRADES**", ""]
+    grouped = {}
     for g in grades:
-        lines.append(f"  [{g.course_name}] **{g.grade}**")
-        if g.url:
-            lines.append(f"    {g.url}")
+        grouped.setdefault(g.course_name, []).append(g)
+    for course in sorted(grouped):
+        lines.append(f"**{course}**")
+        for g in grouped[course]:
+            lines.append(f"  • **{g.grade}**")
+            if g.url:
+                lines.append(f"    {g.url}")
+        lines.append("")
     lines.append("")
 
-    message = "\n".join(lines)
+    message = "\n".join(lines).strip()
     log.info("Sending grades to Discord...")
-    send_discord(message)
-    log.info("Grades sent.")
+    sent = send_discord(message)
+    if sent:
+        log.info("Grades sent.")
+    else:
+        log.info("Grades not sent.")
+    return sent
 
 
 def send_notification(changes: Changes):
@@ -177,5 +205,8 @@ def send_notification(changes: Changes):
         return
 
     log.info("Sending Discord notification...")
-    send_discord(message)
-    log.info("Notification sent.")
+    sent = send_discord(message)
+    if sent:
+        log.info("Notification sent.")
+    else:
+        log.info("Notification was not sent.")

@@ -242,11 +242,14 @@ async def run(args):
                     print(f"  [{g.course_name}] {g.grade}")
 
             # On-demand Discord sends
+            sent_any = False
             if args.assignments:
-                send_assignments(assignments)
+                sent_any = send_assignments(assignments) or sent_any
             if args.grades:
-                send_grades(grades)
+                sent_any = send_grades(grades) or sent_any
             if args.assignments or args.grades:
+                if not sent_any:
+                    print("No assignment/grade content sent to Discord.")
                 return
 
             # Analyze mode: download + extract + AI recommendations
