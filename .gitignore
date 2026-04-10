@@ -1,0 +1,5 @@
+.env
+data/browser_state.json
+data/state.json
+data/cron.log
+__pycache__/
