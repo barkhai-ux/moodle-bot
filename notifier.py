@@ -21,7 +21,15 @@ def _append_grouped_items(lines: list[str], items: list[dict], render_item):
     grouped = _group_by_course(items)
     for course in sorted(grouped):
         lines.append(f"**{course}**")
-        for item in grouped[course]:
+        ordered_items = sorted(
+            grouped[course],
+            key=lambda item: (
+                item.get("due_date", "") or "",
+                item.get("title", "") or "",
+                item.get("grade", "") or "",
+            ),
+        )
+        for item in ordered_items:
             for row in render_item(item):
                 if row:
                     lines.append(row)

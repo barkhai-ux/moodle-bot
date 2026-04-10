@@ -10,6 +10,8 @@ from differ import load_state, save_state, build_state, compute_changes
 from notifier import send_notification, send_assignments, send_grades
 from models import to_dict
 
+log = logging.getLogger(__name__)
+
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Moodle Scraper Bot")
@@ -31,10 +33,16 @@ def parse_args():
     args = parser.parse_args()
 
     if args.analyze and args.analyze_all:
-        parser.error("Cannot use --analyze with --analyze-all.")
+        parser.error(
+            "Cannot use --analyze and --analyze-all together. "
+            "Use --analyze for per-course analysis or --analyze-all for one unified plan."
+        )
 
     if (args.assignments or args.grades) and (args.analyze or args.analyze_all):
-        parser.error("Cannot use --assignments/--grades with --analyze/--analyze-all.")
+        parser.error(
+            "Cannot combine snapshot mode (--assignments/--grades) with analysis mode "
+            "(--analyze/--analyze-all). Run them separately."
+        )
 
     return args
 
@@ -82,6 +90,7 @@ async def run_analyze(page, courses, assignments, grades):
     try:
         materials = await scrape_materials(page, selected)
     except Exception as e:
+        log.exception("Failed to scrape materials for selected courses.")
         print(f"Failed to scrape materials: {e}")
         return
 
@@ -160,6 +169,7 @@ async def run_analyze_all(page, courses, assignments, grades):
     try:
         materials = await scrape_materials(page, selected)
     except Exception as e:
+        log.exception("Failed to scrape materials for selected courses.")
         print(f"Failed to scrape materials: {e}")
         return
 
