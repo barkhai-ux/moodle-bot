@@ -31,10 +31,10 @@ def parse_args():
     args = parser.parse_args()
 
     if args.analyze and args.analyze_all:
-        parser.error("Use either --analyze or --analyze-all, not both.")
+        parser.error("Cannot use --analyze with --analyze-all.")
 
     if (args.assignments or args.grades) and (args.analyze or args.analyze_all):
-        parser.error("Assignment/grade snapshot commands cannot be combined with analyze modes.")
+        parser.error("Cannot use --assignments/--grades with --analyze/--analyze-all.")
 
     return args
 

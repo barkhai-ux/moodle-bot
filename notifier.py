@@ -28,6 +28,15 @@ def _append_grouped_items(lines: list[str], items: list[dict], render_item):
         lines.append("")
 
 
+def _collapse_blank_lines(lines: list[str]) -> list[str]:
+    cleaned = []
+    for line in lines:
+        if line == "" and cleaned and cleaned[-1] == "":
+            continue
+        cleaned.append(line)
+    return cleaned
+
+
 def format_message(changes: Changes) -> str:
     """Format changes into a readable notification message."""
     if not changes.has_any():
@@ -97,12 +106,7 @@ def format_message(changes: Changes) -> str:
             lambda m: [f"  • {m['title']} ({m.get('resource_type', '?')})"],
         )
 
-    cleaned = []
-    for line in lines:
-        if line == "" and cleaned and cleaned[-1] == "":
-            continue
-        cleaned.append(line)
-    return "\n".join(cleaned).strip()
+    return "\n".join(_collapse_blank_lines(lines)).strip()
 
 
 def send_discord(message: str) -> bool:
@@ -164,7 +168,6 @@ def send_assignments(assignments) -> bool:
             if a.get("url"):
                 lines.append(f"    {a['url']}")
         lines.append("")
-    lines.append("")
 
     message = "\n".join(lines).strip()
     log.info("Sending assignments to Discord...")
@@ -199,7 +202,6 @@ def send_grades(grades) -> bool:
             if g.get("url"):
                 lines.append(f"    {g['url']}")
         lines.append("")
-    lines.append("")
 
     message = "\n".join(lines).strip()
     log.info("Sending grades to Discord...")
