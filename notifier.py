@@ -145,16 +145,24 @@ def send_assignments(assignments) -> bool:
         return False
 
     lines = ["**📋 ALL ASSIGNMENTS**", ""]
-    grouped = {}
-    for a in assignments:
-        grouped.setdefault(a.course_name, []).append(a)
+    assignment_dicts = [
+        {
+            "course_name": a.course_name,
+            "title": a.title,
+            "due_date": a.due_date,
+            "status": a.status,
+            "url": a.url,
+        }
+        for a in assignments
+    ]
+    grouped = _group_by_course(assignment_dicts)
     for course in sorted(grouped):
         lines.append(f"**{course}**")
         for a in grouped[course]:
-            lines.append(f"  • **{a.title}**")
-            lines.append(f"    Due: {a.due_date or 'N/A'} — {a.status}")
-            if a.url:
-                lines.append(f"    {a.url}")
+            lines.append(f"  • **{a['title']}**")
+            lines.append(f"    Due: {a.get('due_date') or 'N/A'} — {a.get('status', 'N/A')}")
+            if a.get("url"):
+                lines.append(f"    {a['url']}")
         lines.append("")
     lines.append("")
 
@@ -175,15 +183,21 @@ def send_grades(grades) -> bool:
         return False
 
     lines = ["**📊 ALL GRADES**", ""]
-    grouped = {}
-    for g in grades:
-        grouped.setdefault(g.course_name, []).append(g)
+    grade_dicts = [
+        {
+            "course_name": g.course_name,
+            "grade": g.grade,
+            "url": g.url,
+        }
+        for g in grades
+    ]
+    grouped = _group_by_course(grade_dicts)
     for course in sorted(grouped):
         lines.append(f"**{course}**")
         for g in grouped[course]:
-            lines.append(f"  • **{g.grade}**")
-            if g.url:
-                lines.append(f"    {g.url}")
+            lines.append(f"  • **{g.get('grade', 'N/A')}**")
+            if g.get("url"):
+                lines.append(f"    {g['url']}")
         lines.append("")
     lines.append("")
 
