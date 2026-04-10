@@ -9,6 +9,25 @@ log = logging.getLogger(__name__)
 MAX_DISCORD_LENGTH = 2000  # Discord message character limit
 
 
+def _group_by_course(items, course_key: str = "course_name") -> dict[str, list[dict]]:
+    grouped: dict[str, list[dict]] = {}
+    for item in items:
+        course = item.get(course_key, "Unknown course")
+        grouped.setdefault(course, []).append(item)
+    return grouped
+
+
+def _append_grouped_items(lines: list[str], items: list[dict], render_item):
+    grouped = _group_by_course(items)
+    for course in sorted(grouped):
+        lines.append(f"**{course}**")
+        for item in grouped[course]:
+            for row in render_item(item):
+                if row:
+                    lines.append(row)
+        lines.append("")
+
+
 def format_message(changes: Changes) -> str:
     """Format changes into a readable notification message."""
     if not changes.has_any():
@@ -18,49 +37,72 @@ def format_message(changes: Changes) -> str:
 
     if changes.upcoming_deadlines:
         lines.append(f"**⏰ UPCOMING DEADLINES ({len(changes.upcoming_deadlines)})**")
-        for a in changes.upcoming_deadlines:
-            lines.append(f"  [{a['course_name']}] **{a['title']}**")
-            lines.append(f"    Due: {a.get('due_date', 'N/A')}")
-            if a.get("url"):
-                lines.append(f"    {a['url']}")
-        lines.append("")
+        _append_grouped_items(
+            lines,
+            changes.upcoming_deadlines,
+            lambda a: [
+                f"  • **{a['title']}**",
+                f"    Due: {a.get('due_date', 'N/A')}",
+                f"    {a['url']}" if a.get("url") else None,
+            ],
+        )
 
     if changes.new_assignments:
         lines.append(f"**📝 NEW ASSIGNMENTS ({len(changes.new_assignments)})**")
-        for a in changes.new_assignments:
-            lines.append(f"  [{a['course_name']}] **{a['title']}**")
-            lines.append(f"    Due: {a.get('due_date', 'N/A')}")
-            if a.get("url"):
-                lines.append(f"    {a['url']}")
-        lines.append("")
+        _append_grouped_items(
+            lines,
+            changes.new_assignments,
+            lambda a: [
+                f"  • **{a['title']}**",
+                f"    Due: {a.get('due_date', 'N/A')}",
+                f"    {a['url']}" if a.get("url") else None,
+            ],
+        )
 
     if changes.grade_updates:
         lines.append(f"**📊 GRADE UPDATES ({len(changes.grade_updates)})**")
-        for old, new in changes.grade_updates:
-            lines.append(
-                f"  [{new['course_name']}] {old.get('grade', '?')} → **{new.get('grade', '?')}**"
-            )
-            if new.get("url"):
-                lines.append(f"    {new['url']}")
-        lines.append("")
+        grade_updates = [
+            {
+                "old": old,
+                "new": new,
+                "course_name": new.get("course_name", "Unknown course"),
+            }
+            for old, new in changes.grade_updates
+        ]
+        _append_grouped_items(
+            lines,
+            grade_updates,
+            lambda u: [
+                f"  • {u['old'].get('grade', '?')} → **{u['new'].get('grade', '?')}**",
+                f"    {u['new']['url']}" if u["new"].get("url") else None,
+            ],
+        )
 
     if changes.new_grades:
         lines.append(f"**📊 NEW GRADES ({len(changes.new_grades)})**")
-        for g in changes.new_grades:
-            lines.append(f"  [{g['course_name']}] **{g.get('grade', '-')}**")
-            if g.get("url"):
-                lines.append(f"    {g['url']}")
-        lines.append("")
+        _append_grouped_items(
+            lines,
+            changes.new_grades,
+            lambda g: [
+                f"  • **{g.get('grade', '-')}**",
+                f"    {g['url']}" if g.get("url") else None,
+            ],
+        )
 
     if changes.new_materials:
         lines.append(f"**📂 NEW MATERIALS ({len(changes.new_materials)})**")
-        for m in changes.new_materials:
-            lines.append(
-                f"  [{m['course_name']}] {m['title']} ({m.get('resource_type', '?')})"
-            )
-        lines.append("")
+        _append_grouped_items(
+            lines,
+            changes.new_materials,
+            lambda m: [f"  • {m['title']} ({m.get('resource_type', '?')})"],
+        )
 
-    return "\n".join(lines)
+    cleaned = []
+    for line in lines:
+        if line == "" and cleaned and cleaned[-1] == "":
+            continue
+        cleaned.append(line)
+    return "\n".join(cleaned).strip()
 
 
 def send_discord(message: str):
