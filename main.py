@@ -1,8 +1,6 @@
 import argparse
 import asyncio
 import logging
-import sys
-from pathlib import Path
 
 from playwright.async_api import async_playwright
 
@@ -30,7 +28,15 @@ def parse_args():
                         help="Download materials and generate AI learning recommendations")
     parser.add_argument("--analyze-all", action="store_true",
                         help="Analyze all selected courses together in one unified study plan")
-    return parser.parse_args()
+    args = parser.parse_args()
+
+    if args.analyze and args.analyze_all:
+        parser.error("Use either --analyze or --analyze-all, not both.")
+
+    if (args.assignments or args.grades) and (args.analyze or args.analyze_all):
+        parser.error("Assignment/grade snapshot commands cannot be combined with analyze modes.")
+
+    return args
 
 
 def pick_courses(courses: list[tuple[str, str, str]]) -> list[tuple[str, str, str]]:
@@ -67,13 +73,17 @@ async def run_analyze(page, courses, assignments, grades):
     from downloader import download_course_materials
     from extractor import extract_all
     from analyzer import analyze_course
-    from config import DOWNLOADS_DIR, DATA_DIR
+    from config import DATA_DIR
 
     selected = pick_courses(courses)
 
     # First scrape materials for selected courses only
     print("\nScraping materials for selected courses...")
-    materials = await scrape_materials(page, selected)
+    try:
+        materials = await scrape_materials(page, selected)
+    except Exception as e:
+        print(f"Failed to scrape materials: {e}")
+        return
 
     # Group materials by course
     by_course = {}
@@ -147,7 +157,11 @@ async def run_analyze_all(page, courses, assignments, grades):
     selected = pick_courses(courses)
 
     print("\nScraping materials for selected courses...")
-    materials = await scrape_materials(page, selected)
+    try:
+        materials = await scrape_materials(page, selected)
+    except Exception as e:
+        print(f"Failed to scrape materials: {e}")
+        return
 
     # Group materials by course
     by_course = {}
@@ -211,6 +225,68 @@ async def run_analyze_all(page, courses, assignments, grades):
     print(f"\n  Saved to: {analysis_file}")
 
 
+async def run_snapshot_mode(args, page):
+    """Send current assignments/grades snapshots to Discord and exit."""
+    assignments = []
+    grades = []
+
+    if args.assignments:
+        assignments = await scrape_assignments(page)
+        if args.verbose:
+            print(f"\nAssignments ({len(assignments)}):")
+            for a in assignments:
+                print(f"  [{a.course_name}] {a.title} — Due: {a.due_date} — {a.status}")
+
+    if args.grades:
+        courses = await scrape_courses(page)
+        if args.verbose:
+            print(f"\nCourses ({len(courses)}):")
+            for cid, name, url in courses:
+                print(f"  [{cid}] {name}")
+
+        grades = await scrape_grades(page, courses)
+        if args.verbose:
+            print(f"\nGrades ({len(grades)}):")
+            for g in grades:
+                print(f"  [{g.course_name}] {g.grade}")
+
+    sent_any = False
+    if args.assignments:
+        sent_any = send_assignments(assignments) or sent_any
+    if args.grades:
+        sent_any = send_grades(grades) or sent_any
+
+    if not sent_any:
+        print("No assignment/grade content sent to Discord.")
+
+
+async def run_monitor_mode(args, courses, assignments, grades):
+    """Run default monitor mode: scrape materials, diff state, notify, save."""
+    materials = await scrape_materials(page, courses)
+    if args.verbose:
+        print(f"\nMaterials ({len(materials)}):")
+        for m in materials:
+            print(f"  [{m.course_name}] {m.title} ({m.resource_type})")
+
+    # Diff
+    new_state = build_state(assignments, grades, materials)
+    old_state = load_state()
+    changes = compute_changes(old_state, new_state)
+
+    print(f"\nChanges: {changes.summary()}")
+
+    # Notify
+    if changes.has_any() and not args.first_run and not args.dry_run:
+        send_notification(changes)
+    elif args.first_run:
+        print("First run — skipping notifications, saving initial state.")
+    elif args.dry_run:
+        print("Dry run — skipping notifications.")
+
+    # Save state
+    save_state(new_state)
+
+
 async def run(args):
     async with async_playwright() as pw:
         # Force re-login by deleting saved session
@@ -222,7 +298,11 @@ async def run(args):
         browser, context, page = await get_authenticated_context(pw, headed=args.headed)
 
         try:
-            # Scrape courses and assignments (always needed)
+            if args.assignments or args.grades:
+                await run_snapshot_mode(args, page)
+                return
+
+            # Scrape baseline entities for analyze/monitor modes
             courses = await scrape_courses(page)
             if args.verbose:
                 print(f"\nCourses ({len(courses)}):")
@@ -241,47 +321,13 @@ async def run(args):
                 for g in grades:
                     print(f"  [{g.course_name}] {g.grade}")
 
-            # On-demand Discord sends
-            sent_any = False
-            if args.assignments:
-                sent_any = send_assignments(assignments) or sent_any
-            if args.grades:
-                sent_any = send_grades(grades) or sent_any
-            if args.assignments or args.grades:
-                if not sent_any:
-                    print("No assignment/grade content sent to Discord.")
-                return
-
             # Analyze mode: download + extract + AI recommendations
             if args.analyze_all:
                 await run_analyze_all(page, courses, assignments, grades)
             elif args.analyze:
                 await run_analyze(page, courses, assignments, grades)
             else:
-                # Normal scrape mode
-                materials = await scrape_materials(page, courses)
-                if args.verbose:
-                    print(f"\nMaterials ({len(materials)}):")
-                    for m in materials:
-                        print(f"  [{m.course_name}] {m.title} ({m.resource_type})")
-
-                # Diff
-                new_state = build_state(assignments, grades, materials)
-                old_state = load_state()
-                changes = compute_changes(old_state, new_state)
-
-                print(f"\nChanges: {changes.summary()}")
-
-                # Notify
-                if changes.has_any() and not args.first_run and not args.dry_run:
-                    send_notification(changes)
-                elif args.first_run:
-                    print("First run — skipping notifications, saving initial state.")
-                elif args.dry_run:
-                    print("Dry run — skipping notifications.")
-
-                # Save state
-                save_state(new_state)
+                await run_monitor_mode(args, courses, assignments, grades)
 
         finally:
             await browser.close()

@@ -69,6 +69,9 @@ def analyze_course(
     assignments: list[dict],
 ) -> str:
     """Analyze course materials and return learning recommendations."""
+    if not material_texts:
+        return "No extracted materials were available to analyze for this course."
+
     c = _get_client()
 
     # Build context about the course
@@ -131,6 +134,8 @@ Keep the response focused and actionable. Use clear formatting."""
     )
 
     result = response.choices[0].message.content
+    if not result:
+        return "Analysis completed, but the AI service returned an empty response."
     log.info("Received analysis for %s (%d chars).", course_name, len(result))
     return result
 
@@ -150,6 +155,9 @@ def analyze_all_courses(
 
     all_materials: {course_name: {filename: text}}
     """
+    if not all_materials:
+        return "No extracted materials were available to analyze across courses."
+
     c = _get_client()
 
     # Build grades summary
@@ -231,5 +239,7 @@ Keep the response focused, actionable, and well-formatted."""
     )
 
     result = response.choices[0].message.content
+    if not result:
+        return "Analysis completed, but the AI service returned an empty response."
     log.info("Received combined analysis (%d chars).", len(result))
     return result
