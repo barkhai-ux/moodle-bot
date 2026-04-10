@@ -9,6 +9,42 @@ log = logging.getLogger(__name__)
 MAX_DISCORD_LENGTH = 2000  # Discord message character limit
 
 
+def _group_by_course(items, course_key: str = "course_name") -> dict[str, list[dict]]:
+    grouped: dict[str, list[dict]] = {}
+    for item in items:
+        course = item.get(course_key, "Unknown course")
+        grouped.setdefault(course, []).append(item)
+    return grouped
+
+
+def _append_grouped_items(lines: list[str], items: list[dict], render_item):
+    grouped = _group_by_course(items)
+    for course in sorted(grouped):
+        lines.append(f"**{course}**")
+        ordered_items = sorted(
+            grouped[course],
+            key=lambda item: (
+                item.get("due_date", "") or "",
+                item.get("title", "") or "",
+                item.get("grade", "") or "",
+            ),
+        )
+        for item in ordered_items:
+            for row in render_item(item):
+                if row:
+                    lines.append(row)
+        lines.append("")
+
+
+def _collapse_blank_lines(lines: list[str]) -> list[str]:
+    cleaned = []
+    for line in lines:
+        if line == "" and cleaned and cleaned[-1] == "":
+            continue
+        cleaned.append(line)
+    return cleaned
+
+
 def format_message(changes: Changes) -> str:
     """Format changes into a readable notification message."""
     if not changes.has_any():
@@ -18,56 +54,78 @@ def format_message(changes: Changes) -> str:
 
     if changes.upcoming_deadlines:
         lines.append(f"**⏰ UPCOMING DEADLINES ({len(changes.upcoming_deadlines)})**")
-        for a in changes.upcoming_deadlines:
-            lines.append(f"  [{a['course_name']}] **{a['title']}**")
-            lines.append(f"    Due: {a.get('due_date', 'N/A')}")
-            if a.get("url"):
-                lines.append(f"    {a['url']}")
-        lines.append("")
+        _append_grouped_items(
+            lines,
+            changes.upcoming_deadlines,
+            lambda a: [
+                f"  • **{a['title']}**",
+                f"    Due: {a.get('due_date', 'N/A')}",
+                f"    {a['url']}" if a.get("url") else None,
+            ],
+        )
 
     if changes.new_assignments:
         lines.append(f"**📝 NEW ASSIGNMENTS ({len(changes.new_assignments)})**")
-        for a in changes.new_assignments:
-            lines.append(f"  [{a['course_name']}] **{a['title']}**")
-            lines.append(f"    Due: {a.get('due_date', 'N/A')}")
-            if a.get("url"):
-                lines.append(f"    {a['url']}")
-        lines.append("")
+        _append_grouped_items(
+            lines,
+            changes.new_assignments,
+            lambda a: [
+                f"  • **{a['title']}**",
+                f"    Due: {a.get('due_date', 'N/A')}",
+                f"    {a['url']}" if a.get("url") else None,
+            ],
+        )
 
     if changes.grade_updates:
         lines.append(f"**📊 GRADE UPDATES ({len(changes.grade_updates)})**")
-        for old, new in changes.grade_updates:
-            lines.append(
-                f"  [{new['course_name']}] {old.get('grade', '?')} → **{new.get('grade', '?')}**"
-            )
-            if new.get("url"):
-                lines.append(f"    {new['url']}")
-        lines.append("")
+        grade_updates = [
+            {
+                "old": old,
+                "new": new,
+                "course_name": new.get("course_name", "Unknown course"),
+            }
+            for old, new in changes.grade_updates
+        ]
+        _append_grouped_items(
+            lines,
+            grade_updates,
+            lambda u: [
+                f"  • {u['old'].get('grade', '?')} → **{u['new'].get('grade', '?')}**",
+                f"    {u['new']['url']}" if u["new"].get("url") else None,
+            ],
+        )
 
     if changes.new_grades:
         lines.append(f"**📊 NEW GRADES ({len(changes.new_grades)})**")
-        for g in changes.new_grades:
-            lines.append(f"  [{g['course_name']}] **{g.get('grade', '-')}**")
-            if g.get("url"):
-                lines.append(f"    {g['url']}")
-        lines.append("")
+        _append_grouped_items(
+            lines,
+            changes.new_grades,
+            lambda g: [
+                f"  • **{g.get('grade', '-')}**",
+                f"    {g['url']}" if g.get("url") else None,
+            ],
+        )
 
     if changes.new_materials:
         lines.append(f"**📂 NEW MATERIALS ({len(changes.new_materials)})**")
-        for m in changes.new_materials:
-            lines.append(
-                f"  [{m['course_name']}] {m['title']} ({m.get('resource_type', '?')})"
-            )
-        lines.append("")
+        _append_grouped_items(
+            lines,
+            changes.new_materials,
+            lambda m: [f"  • {m['title']} ({m.get('resource_type', '?')})"],
+        )
 
-    return "\n".join(lines)
+    return "\n".join(_collapse_blank_lines(lines)).strip()
 
 
-def send_discord(message: str):
+def send_discord(message: str) -> bool:
     """Send a message to Discord via webhook. Splits if over 2000 chars."""
     if not DISCORD_WEBHOOK_URL:
         log.warning("DISCORD_WEBHOOK_URL not set, skipping notification.")
-        return
+        return False
+
+    if not message.strip():
+        log.info("Empty Discord message, skipping send.")
+        return False
 
     # Split long messages
     chunks = []
@@ -81,50 +139,86 @@ def send_discord(message: str):
     if message:
         chunks.append(message)
 
+    sent_any = False
     for chunk in chunks:
         webhook = DiscordWebhook(url=DISCORD_WEBHOOK_URL, content=chunk)
         response = webhook.execute()
         if response and hasattr(response, "status_code") and response.status_code >= 400:
             log.error("Discord webhook failed: %s", response.status_code)
+            continue
+        sent_any = True
+    return sent_any
 
 
-def send_assignments(assignments):
+def send_assignments(assignments) -> bool:
     """Format and send all current assignments to Discord."""
     if not assignments:
         log.info("No assignments to send.")
-        return
+        return False
 
     lines = ["**📋 ALL ASSIGNMENTS**", ""]
-    for a in assignments:
-        lines.append(f"  [{a.course_name}] **{a.title}**")
-        lines.append(f"    Due: {a.due_date or 'N/A'} — {a.status}")
-        if a.url:
-            lines.append(f"    {a.url}")
-    lines.append("")
+    assignment_dicts = [
+        {
+            "course_name": a.course_name,
+            "title": a.title,
+            "due_date": a.due_date,
+            "status": a.status,
+            "url": a.url,
+        }
+        for a in assignments
+    ]
+    grouped = _group_by_course(assignment_dicts)
+    for course in sorted(grouped):
+        lines.append(f"**{course}**")
+        for a in grouped[course]:
+            lines.append(f"  • **{a['title']}**")
+            lines.append(f"    Due: {a.get('due_date') or 'N/A'} — {a.get('status', 'N/A')}")
+            if a.get("url"):
+                lines.append(f"    {a['url']}")
+        lines.append("")
 
-    message = "\n".join(lines)
+    message = "\n".join(lines).strip()
     log.info("Sending assignments to Discord...")
-    send_discord(message)
-    log.info("Assignments sent.")
+    sent = send_discord(message)
+    if sent:
+        log.info("Assignments sent.")
+    else:
+        log.info("Assignments not sent.")
+    return sent
 
 
-def send_grades(grades):
+def send_grades(grades) -> bool:
     """Format and send all current grades to Discord."""
     if not grades:
         log.info("No grades to send.")
-        return
+        return False
 
     lines = ["**📊 ALL GRADES**", ""]
-    for g in grades:
-        lines.append(f"  [{g.course_name}] **{g.grade}**")
-        if g.url:
-            lines.append(f"    {g.url}")
-    lines.append("")
+    grade_dicts = [
+        {
+            "course_name": g.course_name,
+            "grade": g.grade,
+            "url": g.url,
+        }
+        for g in grades
+    ]
+    grouped = _group_by_course(grade_dicts)
+    for course in sorted(grouped):
+        lines.append(f"**{course}**")
+        for g in grouped[course]:
+            lines.append(f"  • **{g.get('grade', 'N/A')}**")
+            if g.get("url"):
+                lines.append(f"    {g['url']}")
+        lines.append("")
 
-    message = "\n".join(lines)
+    message = "\n".join(lines).strip()
     log.info("Sending grades to Discord...")
-    send_discord(message)
-    log.info("Grades sent.")
+    sent = send_discord(message)
+    if sent:
+        log.info("Grades sent.")
+    else:
+        log.info("Grades not sent.")
+    return sent
 
 
 def send_notification(changes: Changes):
@@ -135,5 +229,8 @@ def send_notification(changes: Changes):
         return
 
     log.info("Sending Discord notification...")
-    send_discord(message)
-    log.info("Notification sent.")
+    sent = send_discord(message)
+    if sent:
+        log.info("Notification sent.")
+    else:
+        log.info("Notification was not sent.")
