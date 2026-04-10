@@ -260,7 +260,7 @@ async def run_snapshot_mode(args, page):
         print("No assignment/grade content sent to Discord.")
 
 
-async def run_monitor_mode(args, courses, assignments, grades):
+async def run_monitor_mode(args, page, courses, assignments, grades):
     """Run default monitor mode: scrape materials, diff state, notify, save."""
     materials = await scrape_materials(page, courses)
     if args.verbose:
@@ -327,7 +327,7 @@ async def run(args):
             elif args.analyze:
                 await run_analyze(page, courses, assignments, grades)
             else:
-                await run_monitor_mode(args, courses, assignments, grades)
+                await run_monitor_mode(args, page, courses, assignments, grades)
 
         finally:
             await browser.close()
