@@ -47,10 +47,11 @@ def _collapse_blank_lines(lines: list[str]) -> list[str]:
 
 def format_message(changes: Changes) -> str:
     """Format changes into a readable notification message."""
-    if not changes.has_any():
-        return ""
-
     lines = ["**📋 MOODLE UPDATE**", ""]
+
+    if not changes.has_any():
+        lines.append("No changes detected.")
+        return "\n".join(lines)
 
     if changes.upcoming_deadlines:
         lines.append(f"**⏰ UPCOMING DEADLINES ({len(changes.upcoming_deadlines)})**")
@@ -222,11 +223,8 @@ def send_grades(grades) -> bool:
 
 
 def send_notification(changes: Changes):
-    """Format and send notification for detected changes."""
+    """Format and send a Discord notification for the latest run."""
     message = format_message(changes)
-    if not message:
-        log.info("No changes to notify.")
-        return
 
     log.info("Sending Discord notification...")
     sent = send_discord(message)
