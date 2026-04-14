@@ -2,7 +2,8 @@ import os
 from pathlib import Path
 from dotenv import load_dotenv
 
-load_dotenv(Path(__file__).parent / ".env")
+PROJECT_DIR = Path(__file__).resolve().parent.parent
+load_dotenv(PROJECT_DIR / ".env")
 
 # Moodle
 BASE_URL = os.getenv("MOODLE_URL", "https://online.aum.edu.mn").rstrip("/")
@@ -35,7 +36,6 @@ DISCORD_CONTROL_GUILD_ID = int(_guild) if _guild.isdigit() else None
 GROQ_API_KEY = os.getenv("GROQ_API_KEY", "")
 
 # Paths
-PROJECT_DIR = Path(__file__).parent
 DATA_DIR = PROJECT_DIR / "data"
 DOWNLOADS_DIR = DATA_DIR / "downloads"
 STATE_FILE = DATA_DIR / "state.json"

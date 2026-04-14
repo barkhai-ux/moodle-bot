@@ -1,7 +1,7 @@
 import logging
 from groq import Groq
 
-from config import GROQ_API_KEY
+from cli.config import GROQ_API_KEY
 
 log = logging.getLogger(__name__)
 

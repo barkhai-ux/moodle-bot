@@ -1,7 +1,7 @@
 import logging
 from playwright.async_api import Playwright
 
-from config import LOGIN_URL, DASHBOARD_URL, STORAGE_STATE
+from cli.config import DASHBOARD_URL, LOGIN_URL, STORAGE_STATE
 
 log = logging.getLogger(__name__)
 
@@ -9,7 +9,11 @@ log = logging.getLogger(__name__)
 MANUAL_LOGIN_TIMEOUT = 300_000
 
 
-async def get_authenticated_context(pw: Playwright, headed: bool = False):
+async def get_authenticated_context(
+    pw: Playwright,
+    headed: bool = False,
+    allow_interactive_login: bool = True,
+):
     """Return (browser, context, page) with an authenticated Moodle session.
 
     Uses saved session cookies when available. If the session is expired
@@ -33,6 +37,12 @@ async def get_authenticated_context(pw: Playwright, headed: bool = False):
         await context.close()
 
     # No valid session — need manual Google login
+    if not allow_interactive_login:
+        await browser.close()
+        raise RuntimeError(
+            "Saved Moodle session is missing or expired. Run /login_refresh to sign in again."
+        )
+
     # Must be headed so the user can interact with Google OAuth
     if not headed:
         await browser.close()

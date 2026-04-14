@@ -2,7 +2,7 @@ import logging
 import re
 from pathlib import Path
 
-from config import DOWNLOADS_DIR
+from cli.config import DOWNLOADS_DIR
 
 log = logging.getLogger(__name__)
 

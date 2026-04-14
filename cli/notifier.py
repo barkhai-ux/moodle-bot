@@ -1,8 +1,8 @@
 import logging
 from discord_webhook import DiscordWebhook
 
-from config import DISCORD_WEBHOOK_URL
-from differ import Changes
+from cli.config import DISCORD_WEBHOOK_URL
+from cli.differ import Changes
 
 log = logging.getLogger(__name__)
 
@@ -190,7 +190,9 @@ def send_assignments(assignments) -> bool:
 
 def send_grades(grades) -> bool:
     """Format and send all current grades to Discord."""
-    if not grades:
+    filtered_grades = [g for g in grades if getattr(g, "course_name", "").strip()]
+
+    if not filtered_grades:
         log.info("No grades to send.")
         return False
 
@@ -201,7 +203,7 @@ def send_grades(grades) -> bool:
             "grade": g.grade,
             "url": g.url,
         }
-        for g in grades
+        for g in filtered_grades
     ]
     grouped = _group_by_course(grade_dicts)
     for course in sorted(grouped):

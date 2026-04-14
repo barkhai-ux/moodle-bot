@@ -1,8 +1,8 @@
 import logging
 from urllib.parse import urlparse, parse_qs
 
-from config import BASE_URL, DASHBOARD_URL, GRADES_OVERVIEW_URL, SEL_COURSE_LINK
-from models import Assignment, Grade, Material
+from cli.config import BASE_URL, DASHBOARD_URL, GRADES_OVERVIEW_URL, SEL_COURSE_LINK
+from cli.models import Assignment, Grade, Material
 
 log = logging.getLogger(__name__)
 
@@ -17,8 +17,9 @@ def _extract_course_id(href: str) -> str:
 async def scrape_courses(page) -> list[tuple[str, str, str]]:
     """Return list of (course_id, course_name, course_url) from the My Courses page."""
     courses_url = f"{BASE_URL}/my/courses.php"
+    log.info("Loading courses page: %s", courses_url)
     await page.goto(courses_url, timeout=30000)
-    await page.wait_for_load_state("networkidle")
+    await page.wait_for_load_state("domcontentloaded")
 
     # Wait for course cards to render (they're loaded dynamically)
     try:
@@ -60,7 +61,7 @@ async def scrape_assignments(page) -> list[Assignment]:
 
     log.info("Scraping assignments from dashboard timeline...")
     await page.goto(DASHBOARD_URL, timeout=30000)
-    await page.wait_for_load_state("networkidle")
+    await page.wait_for_load_state("domcontentloaded")
 
     # Wait for the timeline to render
     try:
@@ -142,14 +143,16 @@ async def scrape_assignments(page) -> list[Assignment]:
     return assignments
 
 
-async def scrape_grades(page, courses: list[tuple[str, str, str]]) -> list[Grade]:
+async def scrape_grades(page, courses: list[tuple[str, str, str]] | None = None) -> list[Grade]:
     """Scrape grades from the grades overview page."""
     grades = []
+    skipped_empty_rows = 0
 
     log.info("Scraping grades overview...")
     try:
         await page.goto(GRADES_OVERVIEW_URL, timeout=30000)
         await page.wait_for_load_state("domcontentloaded")
+        log.info("Grades overview loaded: %s", page.url)
     except Exception as e:
         log.warning("Failed to load grades overview: %s", e)
         return grades
@@ -170,6 +173,13 @@ async def scrape_grades(page, courses: list[tuple[str, str, str]]) -> list[Grade
             grade_url = ""
 
         grade_text = (await cells[1].inner_text()).strip() or "-"
+
+        # Moodle may render placeholder/empty rows in the grade table.
+        # Ignore rows that don't identify a course at all.
+        if not cname:
+            skipped_empty_rows += 1
+            continue
+
         cid = _extract_course_id(grade_url)
 
         grades.append(Grade(
@@ -179,6 +189,9 @@ async def scrape_grades(page, courses: list[tuple[str, str, str]]) -> list[Grade
             url=grade_url,
             course_id=cid,
         ))
+
+    if skipped_empty_rows:
+        log.info("Skipped %d empty grade rows.", skipped_empty_rows)
 
     log.info("Found %d grade entries.", len(grades))
     return grades

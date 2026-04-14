@@ -5,12 +5,12 @@ from typing import Any, Awaitable, Callable, TypeVar
 
 from playwright.async_api import async_playwright
 
-from config import DATA_DIR, STORAGE_STATE
-from differ import build_state, compute_changes, load_state, save_state
-from login import get_authenticated_context
-from models import to_dict
-from notifier import send_notification
-from scraper import scrape_assignments, scrape_courses, scrape_grades, scrape_materials
+from cli.config import DATA_DIR, STORAGE_STATE
+from cli.differ import build_state, compute_changes, load_state, save_state
+from cli.login import get_authenticated_context
+from cli.models import to_dict
+from cli.notifier import send_notification
+from cli.scraper import scrape_assignments, scrape_courses, scrape_grades, scrape_materials
 
 log = logging.getLogger(__name__)
 
@@ -81,12 +81,16 @@ async def run_snapshot(
     include_grades: bool,
     verbose: bool = False,
 ) -> SnapshotResult:
+    log.info(
+        "Running snapshot include_assignments=%s include_grades=%s",
+        include_assignments,
+        include_grades,
+    )
     assignments = await scrape_assignments(page) if include_assignments else []
     grades = []
 
     if include_grades:
-        courses = await scrape_courses(page)
-        grades = await scrape_grades(page, courses)
+        grades = await scrape_grades(page)
 
     if verbose and assignments:
         print(f"\nAssignments ({len(assignments)}):")
@@ -142,9 +146,9 @@ async def run_analyze(
     page,
     selectors: list[str] | None = None,
 ) -> list[Path]:
-    from analyzer import analyze_course
-    from downloader import download_course_materials
-    from extractor import extract_all
+    from cli.analyzer import analyze_course
+    from cli.downloader import download_course_materials
+    from cli.extractor import extract_all
 
     courses, assignments, grades = await collect_baseline(page, verbose=False)
     selected = select_courses(courses, selectors)
@@ -189,9 +193,9 @@ async def run_analyze_all(
     page,
     selectors: list[str] | None = None,
 ) -> Path | None:
-    from analyzer import analyze_all_courses
-    from downloader import download_course_materials
-    from extractor import extract_all
+    from cli.analyzer import analyze_all_courses
+    from cli.downloader import download_course_materials
+    from cli.extractor import extract_all
 
     courses, assignments, grades = await collect_baseline(page, verbose=False)
     selected = select_courses(courses, selectors)
@@ -234,15 +238,28 @@ async def run_authenticated(
     action: Callable[[Any], Awaitable[T]],
     headed: bool = False,
     force_login: bool = False,
+    allow_interactive_login: bool = True,
 ) -> T:
+    log.info(
+        "Opening authenticated browser context headed=%s force_login=%s interactive_login=%s",
+        headed,
+        force_login,
+        allow_interactive_login,
+    )
     async with async_playwright() as pw:
         if force_login:
             STORAGE_STATE.unlink(missing_ok=True)
             headed = True
 
-        browser, context, page = await get_authenticated_context(pw, headed=headed)
+        browser, context, page = await get_authenticated_context(
+            pw,
+            headed=headed,
+            allow_interactive_login=allow_interactive_login,
+        )
         try:
-            return await action(page)
+            result = await action(page)
+            log.info("Authenticated action completed successfully.")
+            return result
         finally:
             await context.close()
             await browser.close()

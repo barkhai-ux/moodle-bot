@@ -3,8 +3,8 @@ import logging
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 
-from config import STATE_FILE
-from models import Assignment, Grade, Material, to_dict
+from cli.config import STATE_FILE
+from cli.models import Assignment, Grade, Material, to_dict
 
 log = logging.getLogger(__name__)
 

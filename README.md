@@ -49,17 +49,10 @@ The bot provides these slash commands:
 
 ## Project Structure
 
-- main.py: CLI entrypoint
-- discord_bot.py: Discord slash-command bot
-- services.py: shared orchestration used by CLI and Discord bot
-- login.py: Playwright authentication/session persistence
-- scraper.py: course/assignment/grade/material scraping
-- differ.py: state load/save + change detection
-- notifier.py: Discord webhook formatting/sending
-- downloader.py: file download helpers
-- extractor.py: text extraction from PDF/PPTX
-- analyzer.py: Groq-based recommendation generation
-- config.py: environment and constants
+- main.py: root CLI launcher
+- discord_bot.py: root Discord launcher
+- cli/: CLI entrypoint plus shared runtime modules
+- discord/: Discord slash-command bot implementation
 - data/: state, browser session, downloads, generated analyses
 
 ## Setup
