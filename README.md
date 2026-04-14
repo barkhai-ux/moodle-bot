@@ -155,6 +155,31 @@ If your shell points to a different Python, run with explicit venv interpreter:
 .venv/bin/python discord_bot.py
 ```
 
+### How to use in Discord
+
+1. Start the bot locally:
+
+```bash
+python discord_bot.py
+```
+
+2. Open your Discord server and confirm `/ping` works.
+
+3. Run `/login_refresh` once to open a visible Chromium window and sign in to Moodle with Google.
+
+4. After login finishes, use the slash commands normally:
+
+- `/assignments_now` to get current assignments
+- `/grades_now` to get current grades
+- `/monitor_now` to run a full check immediately
+- `/analyze` or `/analyze_all` to generate study recommendations
+
+Notes:
+
+- `/login_refresh` is the only command that should open a visible browser window.
+- Other commands run headlessly and will not show Chromium on screen.
+- If the saved Moodle session expires, run `/login_refresh` again.
+
 ## Example Discord Interactions
 
 ### Health check
