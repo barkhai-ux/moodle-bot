@@ -30,6 +30,85 @@ from cli.services import (
 log = logging.getLogger(__name__)
 MAX_MESSAGE = 1900
 COMMAND_TIMEOUT_SECONDS = 120
+EMBED_COLOR = 0x2F6FED
+SUCCESS_COLOR = 0x2BAA66
+WARNING_COLOR = 0xD98E04
+ERROR_COLOR = 0xC74634
+
+
+def make_embed(
+    title: str,
+    description: str | None = None,
+    *,
+    color: int = EMBED_COLOR,
+) -> discord.Embed:
+    embed = discord.Embed(title=title, color=color)
+    if description:
+        embed.description = description
+    return embed
+
+
+def _truncate_field_value(value: str, limit: int = 1024) -> str:
+    if len(value) <= limit:
+        return value
+    return value[: limit - 1].rstrip() + "…"
+
+
+def _chunk_lines(lines: list[str], limit: int = 900) -> list[str]:
+    chunks: list[str] = []
+    current: list[str] = []
+    current_len = 0
+
+    for line in lines:
+        extra = len(line) + (1 if current else 0)
+        if current and current_len + extra > limit:
+            chunks.append("\n".join(current))
+            current = [line]
+            current_len = len(line)
+            continue
+        current.append(line)
+        current_len += extra
+
+    if current:
+        chunks.append("\n".join(current))
+    return chunks
+
+
+def build_course_embeds(
+    title: str,
+    subtitle: str,
+    grouped_lines: dict[str, list[str]],
+    *,
+    empty_message: str,
+    color: int = EMBED_COLOR,
+) -> list[discord.Embed]:
+    if not grouped_lines:
+        return [make_embed(title, empty_message, color=color)]
+
+    embeds: list[discord.Embed] = []
+    page = 1
+    embed = make_embed(title, subtitle, color=color)
+    field_count = 0
+
+    for course in sorted(grouped_lines):
+        chunks = _chunk_lines(grouped_lines[course])
+        for index, chunk in enumerate(chunks, start=1):
+            if field_count == 25:
+                embeds.append(embed)
+                page += 1
+                embed = make_embed(f"{title} (Page {page})", subtitle, color=color)
+                field_count = 0
+
+            field_name = course if len(chunks) == 1 else f"{course} ({index}/{len(chunks)})"
+            embed.add_field(
+                name=field_name,
+                value=_truncate_field_value(chunk),
+                inline=False,
+            )
+            field_count += 1
+
+    embeds.append(embed)
+    return embeds
 
 
 def split_text(text: str, max_len: int = MAX_MESSAGE) -> list[str]:
@@ -128,25 +207,49 @@ async def guarded_run(
         except asyncio.TimeoutError:
             log.warning("Command timed out: %s", title)
             await interaction.followup.send(
-                f"{title} timed out after {COMMAND_TIMEOUT_SECONDS} seconds.",
+                embed=make_embed(
+                    f"{title} timed out",
+                    f"The command took longer than {COMMAND_TIMEOUT_SECONDS} seconds.",
+                    color=WARNING_COLOR,
+                )
             )
             return
         except Exception as exc:
             log.exception("Command failed: %s", title)
-            await interaction.followup.send(f"{title} failed: {exc}")
+            await interaction.followup.send(
+                embed=make_embed(
+                    f"{title} failed",
+                    str(exc),
+                    color=ERROR_COLOR,
+                )
+            )
             return
 
     if isinstance(result, str):
         for chunk in split_text(result):
             await interaction.followup.send(chunk)
+    elif isinstance(result, discord.Embed):
+        await interaction.followup.send(embed=result)
+    elif isinstance(result, list) and result and all(isinstance(item, discord.Embed) for item in result):
+        for embed in result:
+            await interaction.followup.send(embed=embed)
     else:
-        await interaction.followup.send(f"{title} complete.")
+        await interaction.followup.send(
+            embed=make_embed(f"{title} complete", color=SUCCESS_COLOR)
+        )
 
 
 @bot.tree.command(name="ping", description="Check if the Moodle control bot is alive")
 async def ping(interaction: discord.Interaction):
     log.info("/ping invoked by user=%s guild=%s", getattr(interaction.user, "id", "?"), getattr(interaction.guild, "id", "DM"))
-    await interaction.response.send_message("Pong. Moodle control bot is running.", ephemeral=True)
+    await interaction.response.send_message(
+        embed=make_embed(
+            "Pong",
+            "Moodle control bot is running.",
+            color=SUCCESS_COLOR,
+        ),
+        ephemeral=True,
+    )
 
 
 @bot.tree.command(name="status", description="Show bot state and last monitor run time")
@@ -159,10 +262,10 @@ async def status(interaction: discord.Interaction):
     state = load_state()
     last_run = state.get("last_run", "Never")
     lock_state = "busy" if bot.run_lock.locked() else "idle"
-    await interaction.response.send_message(
-        f"Run lock: {lock_state}\nLast monitor run: {last_run}",
-        ephemeral=True,
-    )
+    embed = make_embed("Bot Status", color=EMBED_COLOR)
+    embed.add_field(name="Run Lock", value=lock_state, inline=True)
+    embed.add_field(name="Last Monitor Run", value=last_run, inline=True)
+    await interaction.response.send_message(embed=embed, ephemeral=True)
 
 
 @bot.tree.command(name="monitor_now", description="Run full monitor cycle immediately")
@@ -173,8 +276,22 @@ async def monitor_now(interaction: discord.Interaction):
             return await run_monitor_mode(page, notify=True)
 
         result = await run_authenticated(_action, allow_interactive_login=False)
-        message = format_message(result.changes)
-        return f"Monitor completed. Summary: {result.changes_summary}\n\n{message}"
+        embed = make_embed(
+            "Monitor Complete",
+            result.changes_summary,
+            color=SUCCESS_COLOR,
+        )
+        embed.add_field(name="Assignments", value=str(result.assignments_count), inline=True)
+        embed.add_field(name="Grades", value=str(result.grades_count), inline=True)
+        embed.add_field(name="Materials", value=str(result.materials_count), inline=True)
+        change_text = format_message(result.changes)
+        if change_text:
+            embed.add_field(
+                name="Details",
+                value=_truncate_field_value(change_text),
+                inline=False,
+            )
+        return embed
 
     await guarded_run(interaction, "Monitor", _runner)
 
@@ -188,13 +305,20 @@ async def assignments_now(interaction: discord.Interaction):
 
         snapshot = await run_authenticated(_action, allow_interactive_login=False)
         if not snapshot.assignments:
-            return "No assignments found."
+            return make_embed("Assignments", "No assignments found.", color=WARNING_COLOR)
 
-        lines = [f"Assignments: {len(snapshot.assignments)}", ""]
+        grouped: dict[str, list[str]] = {}
         for a in snapshot.assignments:
-            lines.append(f"- [{a.course_name}] {a.title}")
-            lines.append(f"  Due: {a.due_date or 'N/A'}")
-        return "\n".join(lines)
+            grouped.setdefault(a.course_name or "Unknown course", []).append(
+                f"• **{a.title}**\nDue: {a.due_date or 'N/A'}"
+            )
+        return build_course_embeds(
+            "Assignments",
+            f"{len(snapshot.assignments)} assignment(s) found",
+            grouped,
+            empty_message="No assignments found.",
+            color=EMBED_COLOR,
+        )
 
     await guarded_run(interaction, "Assignments", _runner)
 
@@ -210,12 +334,18 @@ async def grades_now(interaction: discord.Interaction):
         grades = [g for g in snapshot.grades if g.course_name.strip()]
 
         if not grades:
-            return "No grades found."
+            return make_embed("Grades", "No grades found.", color=WARNING_COLOR)
 
-        lines = [f"Grades: {len(grades)}", ""]
+        grouped: dict[str, list[str]] = {}
         for g in grades:
-            lines.append(f"- [{g.course_name}] {g.grade}")
-        return "\n".join(lines)
+            grouped.setdefault(g.course_name, []).append(f"• **{g.grade or 'N/A'}**")
+        return build_course_embeds(
+            "Grades",
+            f"{len(grades)} grade entry(s) found",
+            grouped,
+            empty_message="No grades found.",
+            color=EMBED_COLOR,
+        )
 
     await guarded_run(interaction, "Grades", _runner)
 
@@ -232,10 +362,19 @@ async def analyze(interaction: discord.Interaction, course: str | None = None):
 
         files = await run_authenticated(_action, allow_interactive_login=False)
         if not files:
-            return "No analysis files were generated."
+            return make_embed("Analyze", "No analysis files were generated.", color=WARNING_COLOR)
 
-        names = "\n".join(f"- {Path(p).name}" for p in files)
-        return f"Generated {len(files)} analysis file(s):\n{names}"
+        embed = make_embed(
+            "Analysis Complete",
+            f"Generated {len(files)} analysis file(s).",
+            color=SUCCESS_COLOR,
+        )
+        embed.add_field(
+            name="Files",
+            value=_truncate_field_value("\n".join(f"• {Path(p).name}" for p in files)),
+            inline=False,
+        )
+        return embed
 
     await guarded_run(interaction, "Analyze", _runner)
 
@@ -252,8 +391,16 @@ async def analyze_all(interaction: discord.Interaction, course_filter: str | Non
 
         path = await run_authenticated(_action, allow_interactive_login=False)
         if not path:
-            return "No unified analysis generated (no extractable materials found)."
-        return f"Unified analysis generated: {Path(path).name}"
+            return make_embed(
+                "Analyze All",
+                "No unified analysis generated. No extractable materials were found.",
+                color=WARNING_COLOR,
+            )
+        return make_embed(
+            "Unified Analysis Complete",
+            f"Generated `{Path(path).name}`.",
+            color=SUCCESS_COLOR,
+        )
 
     await guarded_run(interaction, "Analyze all", _runner)
 
@@ -266,7 +413,11 @@ async def login_refresh(interaction: discord.Interaction):
             return page.url
 
         await run_authenticated(_action, headed=True, force_login=True)
-        return "Session refresh complete."
+        return make_embed(
+            "Login Refresh Complete",
+            "Saved Moodle session has been refreshed.",
+            color=SUCCESS_COLOR,
+        )
 
     await guarded_run(interaction, "Login refresh", _runner)
 
