@@ -1,4 +1,5 @@
 import logging
+import os
 from playwright.async_api import Playwright
 
 from cli.config import DASHBOARD_URL, LOGIN_URL, STORAGE_STATE
@@ -7,6 +8,28 @@ log = logging.getLogger(__name__)
 
 # How long to wait for the user to complete Google OAuth (5 minutes)
 MANUAL_LOGIN_TIMEOUT = 300_000
+
+
+def _has_graphical_display() -> bool:
+    return bool(os.getenv("DISPLAY") or os.getenv("WAYLAND_DISPLAY"))
+
+
+async def _launch_browser(pw: Playwright, headed: bool):
+    mode = "headed" if headed else "headless"
+    log.info("Launching Chromium in %s mode...", mode)
+    try:
+        browser = await pw.chromium.launch(headless=not headed)
+    except Exception as exc:
+        log.exception("Failed to launch Chromium in %s mode", mode)
+        if headed and not _has_graphical_display():
+            raise RuntimeError(
+                "Cannot open a visible browser because this process has no GUI display. "
+                "Start the bot from your desktop session or set DISPLAY/WAYLAND_DISPLAY correctly."
+            ) from exc
+        raise RuntimeError(f"Failed to launch Chromium in {mode} mode: {exc}") from exc
+
+    log.info("Chromium launched in %s mode.", mode)
+    return browser
 
 
 async def get_authenticated_context(
@@ -20,7 +43,7 @@ async def get_authenticated_context(
     or missing, opens a headed browser for manual Google OAuth login,
     then saves the session for future headless runs.
     """
-    browser = await pw.chromium.launch(headless=not headed)
+    browser = await _launch_browser(pw, headed=headed)
 
     # Try restoring a saved session
     if STORAGE_STATE.exists():
@@ -47,7 +70,7 @@ async def get_authenticated_context(
     if not headed:
         await browser.close()
         log.info("No valid session. Relaunching in headed mode for Google login...")
-        browser = await pw.chromium.launch(headless=False)
+        browser = await _launch_browser(pw, headed=True)
 
     context = await browser.new_context()
     page = await context.new_page()

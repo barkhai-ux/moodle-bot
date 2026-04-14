@@ -1,4 +1,5 @@
 import logging
+import asyncio
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Awaitable, Callable, TypeVar
@@ -246,7 +247,10 @@ async def run_authenticated(
         force_login,
         allow_interactive_login,
     )
-    async with async_playwright() as pw:
+    log.info("Starting Playwright driver...")
+    pw = await asyncio.wait_for(async_playwright().start(), timeout=20)
+    log.info("Playwright driver started.")
+    try:
         if force_login:
             STORAGE_STATE.unlink(missing_ok=True)
             headed = True
@@ -263,3 +267,6 @@ async def run_authenticated(
         finally:
             await context.close()
             await browser.close()
+    finally:
+        await pw.stop()
+        log.info("Playwright driver stopped.")
